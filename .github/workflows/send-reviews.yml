@@ -6,6 +6,11 @@ on:
     - cron: '*/10 * * * *'
   # Permite disparar manualmente para testar
   workflow_dispatch:
+    inputs:
+      test_phone:
+        description: 'Número para teste (ex: 5551999990000). Deixe vazio para rodar normal.'
+        required: false
+        default: ''
 
 jobs:
   run:
@@ -25,4 +30,5 @@ jobs:
           EVOLUTION_URL: ${{ secrets.EVOLUTION_URL }}
           EVOLUTION_API_KEY: ${{ secrets.EVOLUTION_API_KEY }}
           EVOLUTION_INSTANCE: ${{ secrets.EVOLUTION_INSTANCE }}
+          TEST_PHONE: ${{ github.event.inputs.test_phone }}
         run: node src/index.js

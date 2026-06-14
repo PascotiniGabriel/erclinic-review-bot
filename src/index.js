@@ -102,6 +102,15 @@ async function sendWhatsApp(rawPhone, firstName) {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // Modo teste: envia mensagem direta sem consultar ER Clinic
+  if (process.env.TEST_PHONE) {
+    const phone = process.env.TEST_PHONE.replace(/\D/g, '');
+    console.log(`[TESTE] Enviando mensagem de teste para ${phone}…`);
+    await sendWhatsApp(phone, 'Teste');
+    console.log(`[TESTE] Mensagem enviada com sucesso!`);
+    return;
+  }
+
   if (!inBusinessHours()) {
     console.log('Fora do horário comercial (8h–20h BRT). Nada a fazer.');
     return;

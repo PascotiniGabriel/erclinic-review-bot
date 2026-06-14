@@ -38,7 +38,10 @@ async function erclinicGet(path, params = {}) {
     headers: { Authorization: `Api-Key ${ERCLINIC_KEY}` }
   });
 
-  if (!res.ok) throw new Error(`ER Clinic GET ${path} → ${res.status}`);
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`ER Clinic GET ${path} → ${res.status}: ${txt}`);
+  }
   return res.json();
 }
 

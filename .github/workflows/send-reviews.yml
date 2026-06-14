@@ -1,0 +1,28 @@
+name: Enviar Pedidos de Avaliação
+
+on:
+  schedule:
+    # A cada 10 minutos (UTC). Funciona somente entre 11h–23h UTC = 8h–20h BRT
+    - cron: '*/10 * * * *'
+  # Permite disparar manualmente para testar
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Executar bot de avaliações
+        env:
+          ERCLINIC_API_KEY: ${{ secrets.ERCLINIC_API_KEY }}
+          EVOLUTION_URL: ${{ secrets.EVOLUTION_URL }}
+          EVOLUTION_API_KEY: ${{ secrets.EVOLUTION_API_KEY }}
+          EVOLUTION_INSTANCE: ${{ secrets.EVOLUTION_INSTANCE }}
+        run: node src/index.js

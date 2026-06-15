@@ -1,3 +1,4 @@
 name = "autoreply-juliany"
 main = "worker.js"
 compatibility_date = "2024-01-01"
+account_id = "2703834f2ad357e5e2d67ea8a27bf7ad"

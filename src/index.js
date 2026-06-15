@@ -74,15 +74,15 @@ async function sendWhatsApp(rawPhone, firstName) {
   const phone = rawPhone.replace(/\D/g, '');
 
   const message = [
-    `Olá, ${firstName}! 😊`,
+    `Olá, ${firstName}! 🙂`,
     '',
-    `Obrigada pela consulta com a Dra. Juliany hoje.`,
+    `Agradeço pela confiança em meu atendimento. Sua opinião é muito importante para que eu possa continuar melhorando e oferecendo a melhor experiência possível.`,
     '',
-    `Se puder, avalie nossa clínica no Google — leva menos de 1 minuto e nos ajuda muito:`,
-    `👉 ${REVIEW_LINK}`,
+    `Se puder, reserve um minutinho para avaliar sua consulta no Google através do link abaixo:`,
     '',
-    `Muito obrigada! 🙏`,
-    `— Equipe Dra. Juliany`
+    REVIEW_LINK,
+    '',
+    `Muito obrigada!`
   ].join('\n');
 
   const res = await fetch(`${EVO_URL}/message/sendText/${EVO_INSTANCE}`, {

@@ -1,9 +1,10 @@
 'use strict';
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const ERCLINIC_KEY   = process.env.ERCLINIC_API_KEY;
-const ERCLINIC_BASE  = 'https://erclinic.com.br';
-const EVO_URL        = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
+const ERCLINIC_KEY      = process.env.ERCLINIC_API_KEY;
+const ERCLINIC_BASE     = 'https://erclinic.com.br';
+const PROFISSIONAL_ID   = process.env.ERCLINIC_PROFISSIONAL_ID || 'a8b2f274ff2e37b46aa7dcce3c3014b2';
+const EVO_URL           = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
 const EVO_KEY        = process.env.EVOLUTION_API_KEY;
 const EVO_INSTANCE   = process.env.EVOLUTION_INSTANCE;
 const REVIEW_LINK    = 'https://g.page/r/CbIF9ryRK9q-EAI/review';
@@ -122,7 +123,8 @@ async function main() {
   const data = await erclinicGet('/v2/api/publica/agenda/appointments/list', {
     status: 'ATENDIDO',
     date_min: today,
-    date_max: today
+    date_max: today,
+    profissional_id: PROFISSIONAL_ID
   });
 
   const appointments = data.content || [];

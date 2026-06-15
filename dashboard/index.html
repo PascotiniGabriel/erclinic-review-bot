@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard WhatsApp — Dra. Juliany</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0f1e; color: #e2e8f0; min-height: 100vh; }
+
+  header { background: #111827; border-bottom: 1px solid #1f2937; padding: 16px 24px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .logo { font-size: 24px; }
+
+  #status-bar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .badge { padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.connected { background: #064e3b; color: #6ee7b7; border: 1px solid #10b981; }
+  .badge.disconnected { background: #450a0a; color: #fca5a5; border: 1px solid #ef4444; }
+  .badge.loading { background: #1c1f2e; color: #94a3b8; border: 1px solid #374151; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px; display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+
+  .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 14px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 16px; }
+
+  /* QR panel */
+  #qr-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #qr-img { width: 260px; height: 260px; border: 4px solid #1f2937; border-radius: 8px; background: #fff; display: block; }
+  #qr-placeholder { width: 260px; height: 260px; border: 2px dashed #374151; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #6ee7b7; font-size: 40px; }
+  #qr-placeholder p { font-size: 13px; color: #6b7280; }
+  #qr-countdown { font-size: 13px; color: #6b7280; }
+  #qr-countdown span { color: #f59e0b; font-weight: 600; }
+  .btn { background: #1d4ed8; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; transition: background 0.2s; }
+  .btn:hover { background: #2563eb; }
+  .btn.danger { background: #7f1d1d; color: #fca5a5; }
+  .btn.danger:hover { background: #991b1b; }
+
+  /* Chats */
+  #chats-list { display: flex; flex-direction: column; gap: 8px; max-height: 500px; overflow-y: auto; }
+  .chat-item { background: #0f172a; border: 1px solid #1f2937; border-radius: 8px; padding: 12px; cursor: default; transition: border-color 0.2s; }
+  .chat-item:hover { border-color: #374151; }
+  .chat-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-last { font-size: 12px; color: #6b7280; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-time { font-size: 11px; color: #4b5563; float: right; margin-left: 8px; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .stat { background: #0f172a; border: 1px solid #1f2937; border-radius: 8px; padding: 14px; }
+  .stat-value { font-size: 28px; font-weight: 700; color: #6ee7b7; }
+  .stat-label { font-size: 12px; color: #6b7280; margin-top: 2px; }
+
+  /* Messages modal */
+  #msg-panel { grid-column: 1 / -1; }
+  #messages-list { display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto; }
+  .msg-item { padding: 10px 14px; border-radius: 8px; font-size: 13px; max-width: 70%; }
+  .msg-item.out { background: #1e3a5f; align-self: flex-end; }
+  .msg-item.in { background: #1f2937; align-self: flex-start; }
+  .msg-meta { font-size: 11px; color: #6b7280; margin-top: 4px; }
+
+  .empty { color: #4b5563; font-size: 13px; text-align: center; padding: 20px; }
+
+  #refresh-time { font-size: 12px; color: #4b5563; text-align: center; margin-top: 8px; }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">📱</span>
+  <h1>WhatsApp Dashboard — Clínica Dra. Juliany</h1>
+  <div id="status-bar">
+    <span class="badge loading" id="status-badge">Verificando...</span>
+    <button class="btn danger" onclick="disconnectInstance()" id="btn-disconnect" style="display:none">Desconectar</button>
+  </div>
+</header>
+
+<div class="container">
+  <!-- Left: QR / connection -->
+  <div>
+    <div class="card">
+      <h2>Conexão WhatsApp</h2>
+      <div id="qr-panel">
+        <div id="qr-placeholder">
+          <span>⏳</span>
+          <p>Verificando status...</p>
+        </div>
+        <div id="qr-countdown" style="display:none">QR expira em <span id="countdown-val">30</span>s</div>
+        <button class="btn" onclick="forceRefreshQR()" id="btn-refresh-qr" style="display:none">🔄 Novo QR</button>
+        <p id="refresh-time"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Stats + Chats -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div class="card">
+      <h2>Resumo</h2>
+      <div class="stats-grid">
+        <div class="stat"><div class="stat-value" id="stat-chats">—</div><div class="stat-label">Conversas</div></div>
+        <div class="stat"><div class="stat-value" id="stat-msgs">—</div><div class="stat-label">Mensagens hoje</div></div>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1">
+      <h2>Conversas recentes</h2>
+      <div id="chats-list"><p class="empty">Conecte o WhatsApp para ver conversas</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'https://api-juliany.onrender.com';
+const KEY = 'Juliany@2024!';
+const INSTANCE = 'clinica-juliany';
+const HEADERS = { 'apikey': KEY, 'Content-Type': 'application/json' };
+
+let connected = false;
+let countdownTimer = null;
+let countdownVal = 30;
+let mainInterval = null;
+
+async function api(method, path, body) {
+  const opts = { method, headers: HEADERS };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  return res.json();
+}
+
+async function checkStatus() {
+  try {
+    const data = await api('GET', `/instance/fetchInstances`);
+    console.log('[DEBUG fetchInstances]', JSON.stringify(data));
+
+    let state = null;
+    if (Array.isArray(data)) {
+      const inst = data.find(i =>
+        i.instance?.instanceName === INSTANCE ||
+        i.instance?.name === INSTANCE ||
+        i.name === INSTANCE
+      );
+      if (inst) {
+        state = inst.instance?.connectionStatus
+             || inst.instance?.status
+             || inst.instance?.state
+             || inst.connectionStatus
+             || inst.status
+             || inst.state;
+        console.log('[DEBUG instance found]', JSON.stringify(inst), 'state=', state);
+      } else {
+        // show raw first element to debug structure
+        console.log('[DEBUG first element]', JSON.stringify(data[0]));
+        const first = data[0];
+        state = first?.instance?.connectionStatus || first?.instance?.status || first?.status;
+      }
+    } else if (data && typeof data === 'object') {
+      state = data.instance?.connectionStatus || data.instance?.status || data.status || data.state;
+      console.log('[DEBUG object response]', JSON.stringify(data), 'state=', state);
+    }
+
+    const OPEN_STATES = ['open', 'connected', 'CONNECTED', 'OPEN', 'authenticated'];
+    connected = OPEN_STATES.includes(state);
+    updateStatusBadge(connected ? 'open' : (state || 'disconnected'));
+    return connected;
+  } catch(e) {
+    console.error('[DEBUG checkStatus error]', e.message);
+    updateStatusBadge('error');
+    return false;
+  }
+}
+
+function updateStatusBadge(state) {
+  const badge = document.getElementById('status-badge');
+  const btnDisc = document.getElementById('btn-disconnect');
+  if (state === 'open') {
+    badge.className = 'badge connected'; badge.textContent = '✓ Conectado';
+    btnDisc.style.display = 'inline-block';
+  } else if (state === 'error') {
+    badge.className = 'badge disconnected'; badge.textContent = '⚠ Erro';
+    btnDisc.style.display = 'none';
+  } else {
+    badge.className = 'badge disconnected'; badge.textContent = '✗ Desconectado';
+    btnDisc.style.display = 'none';
+  }
+}
+
+async function loadQR() {
+  clearCountdown();
+  document.getElementById('btn-refresh-qr').style.display = 'none';
+  document.getElementById('qr-countdown').style.display = 'none';
+
+  const placeholder = document.getElementById('qr-placeholder');
+  placeholder.innerHTML = '<span>⏳</span><p>Gerando QR...</p>';
+  placeholder.style.display = 'flex';
+
+  try {
+    const data = await api('GET', `/instance/connect/${INSTANCE}?number=&count=true`);
+    if (data.base64) {
+      placeholder.style.display = 'none';
+      let img = document.getElementById('qr-img');
+      if (!img) { img = document.createElement('img'); img.id = 'qr-img'; img.alt = 'QR Code'; document.getElementById('qr-panel').prepend(img); }
+      img.className = ''; img.src = data.base64; img.style.cssText = 'width:260px;height:260px;border:4px solid #1f2937;border-radius:8px;background:#fff;display:block;';
+      document.getElementById('qr-countdown').style.display = 'block';
+      document.getElementById('btn-refresh-qr').style.display = 'inline-block';
+      startCountdown(28);
+    } else {
+      placeholder.innerHTML = '<span>⚠️</span><p>Sem QR — tente novamente</p>';
+      document.getElementById('btn-refresh-qr').style.display = 'inline-block';
+    }
+  } catch(e) {
+    placeholder.innerHTML = '<span>❌</span><p>Erro ao conectar API</p>';
+    document.getElementById('btn-refresh-qr').style.display = 'inline-block';
+  }
+  document.getElementById('refresh-time').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+}
+
+function startCountdown(secs) {
+  clearCountdown();
+  countdownVal = secs;
+  document.getElementById('countdown-val').textContent = countdownVal;
+  countdownTimer = setInterval(() => {
+    countdownVal--;
+    document.getElementById('countdown-val').textContent = countdownVal;
+    if (countdownVal <= 0) { clearCountdown(); loadQR(); }
+  }, 1000);
+}
+
+function clearCountdown() {
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+}
+
+function forceRefreshQR() { loadQR(); }
+
+function parseTs(val) {
+  if (!val) return null;
+  if (typeof val === 'string') return new Date(val);
+  return new Date(val > 1e10 ? val : val * 1000);
+}
+
+async function loadChats() {
+  try {
+    const data = await api('POST', `/chat/findChats/${INSTANCE}`, {});
+    const list = document.getElementById('chats-list');
+    if (!Array.isArray(data) || data.length === 0) {
+      list.innerHTML = '<p class="empty">Nenhuma conversa encontrada</p>'; return;
+    }
+    // Só contatos reais (@s.whatsapp.net), deduplicar por remoteJid
+    const seen = new Set();
+    const deduped = data.filter(c => {
+      const jid = c.remoteJid || c.id || '';
+      if (!jid.includes('@s.whatsapp.net')) return false;
+      if (seen.has(jid)) return false;
+      seen.add(jid);
+      return true;
+    });
+    document.getElementById('stat-chats').textContent = deduped.length;
+    const sorted = deduped.sort((a,b) => {
+      const ta = parseTs(b.updatedAt); const tb = parseTs(a.updatedAt);
+      return (ta?.getTime()||0) - (tb?.getTime()||0);
+    }).slice(0, 30);
+    list.innerHTML = sorted.map(c => {
+      const name = c.name || c.remoteJid?.split('@')[0] || '—';
+      const last = c.lastMessage?.message?.conversation || c.lastMessage?.message?.extendedTextMessage?.text || '';
+      const tsObj = parseTs(c.updatedAt);
+      const ts = tsObj && !isNaN(tsObj) ? tsObj.toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+      return `<div class="chat-item"><span class="chat-time">${ts}</span><div class="chat-name">${name}</div>${last ? `<div class="chat-last">${last.substring(0,80)}</div>` : ''}</div>`;
+    }).join('');
+  } catch(e) {
+    console.error('loadChats error:', e);
+    document.getElementById('chats-list').innerHTML = '<p class="empty">Erro ao carregar conversas</p>';
+  }
+}
+
+async function disconnectInstance() {
+  if (!confirm('Desconectar o WhatsApp?')) return;
+  await api('DELETE', `/instance/logout/${INSTANCE}`);
+  connected = false; updateStatusBadge('disconnected');
+  document.getElementById('chats-list').innerHTML = '<p class="empty">Conecte o WhatsApp para ver conversas</p>';
+  document.getElementById('stat-chats').textContent = '—';
+  await loadQR();
+}
+
+async function tick() {
+  const isConn = await checkStatus();
+  if (isConn) {
+    clearCountdown();
+    const img = document.getElementById('qr-img');
+    if (img) img.remove();
+    const ph = document.getElementById('qr-placeholder');
+    ph.style.display = 'flex';
+    ph.innerHTML = '<span>✅</span><p>WhatsApp conectado!</p>';
+    document.getElementById('qr-countdown').style.display = 'none';
+    document.getElementById('btn-refresh-qr').style.display = 'none';
+    loadChats();
+  } else {
+    document.getElementById('chats-list').innerHTML = '<p class="empty">Conecte o WhatsApp para ver conversas</p>';
+    document.getElementById('stat-chats').textContent = '—';
+    loadQR();
+  }
+}
+
+tick();
+mainInterval = setInterval(tick, 30000);
+</script>
+</body>
+</html>

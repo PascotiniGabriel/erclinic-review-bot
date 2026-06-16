@@ -37,8 +37,9 @@ export default {
       return new Response('ignored', { status: 200 });
     }
 
-    const msg = body.data?.message || body.data;
-    if (!msg) return new Response('no message', { status: 200 });
+    const dataRaw = body.data;
+    const msg = Array.isArray(dataRaw) ? dataRaw[0] : dataRaw;
+    if (!msg?.key) return new Response('no message', { status: 200 });
 
     // Ignorar mensagens enviadas por nós mesmos
     if (msg.key?.fromMe) return new Response('fromMe', { status: 200 });

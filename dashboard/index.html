@@ -65,9 +65,47 @@
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+  /* Auth overlay */
+  #auth-overlay { position: fixed; inset: 0; background: #0a0f1e; display: flex; align-items: center; justify-content: center; z-index: 9999; }
+  #auth-box { background: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 40px 32px; width: 340px; text-align: center; }
+  #auth-box h2 { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+  #auth-box p { font-size: 13px; color: #6b7280; margin-bottom: 24px; }
+  #auth-input { width: 100%; padding: 10px 14px; background: #0f172a; border: 1px solid #374151; border-radius: 8px; color: #e2e8f0; font-size: 14px; margin-bottom: 12px; outline: none; }
+  #auth-input:focus { border-color: #1d4ed8; }
+  #auth-error { font-size: 12px; color: #fca5a5; margin-bottom: 12px; min-height: 16px; }
 </style>
 </head>
 <body>
+
+<div id="auth-overlay">
+  <div id="auth-box">
+    <span style="font-size:36px">🔒</span>
+    <h2>Acesso Restrito</h2>
+    <p>Dashboard — Clínica Dra. Juliany</p>
+    <input id="auth-input" type="password" placeholder="Senha" onkeydown="if(event.key==='Enter')checkAuth()" autofocus>
+    <div id="auth-error"></div>
+    <button class="btn" style="width:100%" onclick="checkAuth()">Entrar</button>
+  </div>
+</div>
+
+<script>
+(function() {
+  if (sessionStorage.getItem('auth') === '1') {
+    document.getElementById('auth-overlay').style.display = 'none';
+  }
+  window.checkAuth = function() {
+    const val = document.getElementById('auth-input').value;
+    if (val === 'avaliacao2026!') {
+      sessionStorage.setItem('auth', '1');
+      document.getElementById('auth-overlay').style.display = 'none';
+    } else {
+      document.getElementById('auth-error').textContent = 'Senha incorreta.';
+      document.getElementById('auth-input').value = '';
+      document.getElementById('auth-input').focus();
+    }
+  };
+})();
+</script>
 
 <header>
   <span class="logo">📱</span>

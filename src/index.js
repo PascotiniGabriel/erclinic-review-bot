@@ -5,28 +5,34 @@ const ERCLINIC_KEY      = process.env.ERCLINIC_API_KEY;
 const ERCLINIC_BASE     = 'https://erclinic.com.br';
 const PROFISSIONAL_ID   = process.env.ERCLINIC_PROFISSIONAL_ID || 'a8b2f274ff2e37b46aa7dcce3c3014b2';
 const EVO_URL           = (process.env.EVOLUTION_URL || '').replace(/\/$/, '');
-const EVO_KEY        = process.env.EVOLUTION_API_KEY;
-const EVO_INSTANCE   = process.env.EVOLUTION_INSTANCE;
-const REVIEW_LINK    = 'https://g.page/r/CbIF9ryRK9q-EAI/review';
+const EVO_KEY           = process.env.EVOLUTION_API_KEY;
+const EVO_INSTANCE      = process.env.EVOLUTION_INSTANCE;
+const REVIEW_LINK       = 'https://g.page/r/CbIF9ryRK9q-EAI/review';
+
+// Anti-ban: max messages per run (never spam in bulk)
+const MAX_PER_RUN = 10;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// Returns current date in Brasília (UTC-3) as yyyy-mm-dd
 function todayBRT() {
   const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
   return d.toISOString().split('T')[0];
 }
 
-// Returns current datetime in BRT as "yyyy-mm-dd HH:MM"
 function nowBRT() {
   const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
   return d.toISOString().slice(0, 16).replace('T', ' ');
 }
 
-// Only send between 8h–20h BRT (11h–23h UTC)
 function inBusinessHours() {
   const h = new Date().getUTCHours();
   return h >= 11 && h < 23;
+}
+
+// Random delay between min–max ms (human-like pacing)
+function randomDelay(minMs, maxMs) {
+  const ms = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  return new Promise(r => setTimeout(r, ms));
 }
 
 // ── ER Clinic API ────────────────────────────────────────────────────────────
@@ -70,7 +76,6 @@ async function markSent(id) {
 // ── Evolution API (WhatsApp) ─────────────────────────────────────────────────
 
 async function sendWhatsApp(rawPhone, firstName) {
-  // Remove qualquer coisa que não seja dígito
   const phone = rawPhone.replace(/\D/g, '');
 
   const message = [
@@ -85,13 +90,27 @@ async function sendWhatsApp(rawPhone, firstName) {
     `Muito obrigada!`
   ].join('\n');
 
+  // Simulate typing indicator before sending (looks human, avoids spam detection)
+  await fetch(`${EVO_URL}/chat/sendPresence/${EVO_INSTANCE}`, {
+    method: 'POST',
+    headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ number: phone, options: { presence: 'composing', delay: 3000 } })
+  }).catch(() => {}); // non-fatal — just best-effort
+
+  // Wait for "typing" to feel natural (3–6s)
+  await randomDelay(3000, 6000);
+
   const res = await fetch(`${EVO_URL}/message/sendText/${EVO_INSTANCE}`, {
     method: 'POST',
     headers: {
       apikey: EVO_KEY,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ number: phone, text: message })
+    body: JSON.stringify({
+      number: phone,
+      text: message,
+      options: { delay: 1200 }  // Evolution API internal delay before delivery
+    })
   });
 
   if (!res.ok) {
@@ -133,7 +152,11 @@ async function main() {
   let sent = 0;
 
   for (const appt of appointments) {
-    // Já enviamos antes? reminder_sent_date preenchido = sim
+    if (sent >= MAX_PER_RUN) {
+      console.log(`  ⚠ Limite de ${MAX_PER_RUN} mensagens/execução atingido. Restantes serão enviados na próxima rodada.`);
+      break;
+    }
+
     if (appt.reminder_sent_date) {
       console.log(`  ↷ ${appt.id.slice(0, 10)}… — avaliação já enviada`);
       continue;
@@ -153,8 +176,13 @@ async function main() {
       sent++;
       console.log(`  ✓ Enviado para ${firstName} (${phone})`);
 
-      // Pausa entre envios para não parecer spam
-      await new Promise(r => setTimeout(r, 4000));
+      // Anti-ban: delay humano aleatório entre mensagens (25–50s)
+      // Nunca disparar em rajada — parecer humano é fundamental
+      if (sent < MAX_PER_RUN) {
+        const delayMs = Math.floor(Math.random() * 25000) + 25000; // 25–50s
+        console.log(`  ⏱ Aguardando ${Math.round(delayMs / 1000)}s antes do próximo envio…`);
+        await randomDelay(25000, 50000);
+      }
     } catch (err) {
       console.error(`  ✗ ${appt.id.slice(0, 10)}… — ${err.message}`);
     }

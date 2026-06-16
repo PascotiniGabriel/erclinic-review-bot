@@ -176,12 +176,12 @@ async function main() {
       sent++;
       console.log(`  ✓ Enviado para ${firstName} (${phone})`);
 
-      // Anti-ban: delay humano aleatório entre mensagens (25–50s)
+      // Anti-ban: delay humano aleatório entre mensagens (4–8 min)
       // Nunca disparar em rajada — parecer humano é fundamental
       if (sent < MAX_PER_RUN) {
-        const delayMs = Math.floor(Math.random() * 25000) + 25000; // 25–50s
-        console.log(`  ⏱ Aguardando ${Math.round(delayMs / 1000)}s antes do próximo envio…`);
-        await randomDelay(25000, 50000);
+        const delayMs = Math.floor(Math.random() * 240000) + 240000; // 4–8 min
+        console.log(`  ⏱ Aguardando ${Math.round(delayMs / 60000)}min antes do próximo envio…`);
+        await randomDelay(240000, 480000);
       }
     } catch (err) {
       console.error(`  ✗ ${appt.id.slice(0, 10)}… — ${err.message}`);

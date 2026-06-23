@@ -13,18 +13,41 @@ const AUTO_REPLY = [
   'Obrigada! 🙏'
 ].join('\n');
 
-const SYSTEM_PROMPT = `Você é a assistente virtual da Dra. Juliany Carvalho, dentista. Um paciente acabou de ser atendido e recebeu uma pergunta sobre como foi a consulta. Agora ele respondeu.
+const SENTIMENT_PROMPT = `Você é um classificador de sentimento. Um paciente respondeu sobre como foi sua consulta odontológica. Classifique a resposta como POSITIVO ou NEGATIVO.
 
-Regras obrigatórias:
+Regras:
+- POSITIVO: elogios, satisfação, gratidão, respostas neutras/curtas como "bom", "ok", "tudo bem", "legal", emojis positivos, ou qualquer coisa que NÃO seja uma reclamação explícita
+- NEGATIVO: reclamações explícitas, insatisfação clara, críticas ao atendimento, dor, problema não resolvido
+
+Responda APENAS com a palavra POSITIVO ou NEGATIVO, nada mais.`;
+
+const POSITIVE_PROMPT = `Você é a assistente virtual da Dra. Juliany Carvalho, dentista. O paciente avaliou positivamente o atendimento.
+
+Regras:
 - Responda em 1-3 frases, curto e acolhedor
-- SEMPRE inclua o link de avaliação no Google ao final: ${REVIEW_LINK}
-- Se perguntarem algo sobre consulta, agendamento ou dúvida médica, redirecione para o WhatsApp da clínica: ${CLINIC_PHONE}
-- Nunca dê conselhos ou informações médicas/odontológicas
+- Agradeça o feedback positivo
+- Peça gentilmente para deixar a avaliação no Google, enfatizando a importância: ajuda outros pacientes a conhecerem o trabalho da Dra. e contribui para o crescimento da clínica
+- OBRIGATÓRIO incluir o link ao final: ${REVIEW_LINK}
+- Se perguntarem algo médico, redirecione para: ${CLINIC_PHONE}
 - Tom: profissional, caloroso, objetivo
-- Use no máximo 1 emoji por resposta
-- Responda em português brasileiro
-- Não use saudação (o paciente já foi saudado antes)
-- A resposta deve parecer humana e natural, não robótica`;
+- Max 1 emoji por resposta
+- Português brasileiro
+- Sem saudação (paciente já foi saudado)
+- Parecer humana e natural`;
+
+const NEGATIVE_PROMPT = `Você é a assistente virtual da Dra. Juliany Carvalho, dentista. O paciente expressou insatisfação com o atendimento.
+
+Regras:
+- Responda em 1-3 frases, curto e empático
+- Agradeça pelo feedback honesto
+- Diga que a opinião é muito importante e será levada em consideração para melhorar o atendimento
+- NÃO envie link de avaliação
+- NÃO peça para avaliar no Google
+- Se tiver uma reclamação específica, sugira entrar em contato pelo WhatsApp da clínica: ${CLINIC_PHONE}
+- Tom: empático, profissional, acolhedor
+- Max 1 emoji por resposta
+- Português brasileiro
+- Sem saudação`;
 
 export default {
   async fetch(request, env) {
@@ -118,9 +141,26 @@ async function handleWebhook(request, env) {
 
 async function handlePatientReply(env, phone, patientName, messageText) {
   try {
+    // Step 1: Classify sentiment
+    const sentimentResult = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: SENTIMENT_PROMPT },
+        { role: 'user', content: `Resposta do paciente: "${messageText}"` }
+      ],
+      max_tokens: 10,
+      temperature: 0.1
+    });
+
+    const sentiment = (sentimentResult.response || '').trim().toUpperCase();
+    const isPositive = !sentiment.includes('NEGATIVO');
+
+    console.log(`Sentiment for ${patientName}: ${sentiment} (positive=${isPositive})`);
+
+    // Step 2: Generate response based on sentiment
+    const responsePrompt = isPositive ? POSITIVE_PROMPT : NEGATIVE_PROMPT;
     const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: responsePrompt },
         { role: 'user', content: `O paciente ${patientName} respondeu: "${messageText}"` }
       ],
       max_tokens: 256,
@@ -129,28 +169,34 @@ async function handlePatientReply(env, phone, patientName, messageText) {
 
     let replyText = aiResponse.response || '';
 
-    // Fallback if AI didn't include review link
-    if (!replyText.includes(REVIEW_LINK)) {
-      replyText += `\n\n${REVIEW_LINK}`;
-    }
-
-    // Fallback if AI returned empty
-    if (!replyText.trim()) {
-      replyText = `Obrigada pelo retorno, ${patientName}! 😊 Se puder, avalie sua consulta aqui: ${REVIEW_LINK}`;
+    // Fallbacks
+    if (isPositive) {
+      if (!replyText.includes(REVIEW_LINK)) {
+        replyText += `\n\n${REVIEW_LINK}`;
+      }
+      if (!replyText.trim()) {
+        replyText = `Que bom saber, ${patientName}! 😊 Sua avaliação no Google ajuda muito outros pacientes a conhecerem o trabalho da Dra. Juliany: ${REVIEW_LINK}`;
+      }
+    } else {
+      // Remove review link if AI accidentally included it
+      replyText = replyText.replace(REVIEW_LINK, '').replace(/\n{3,}/g, '\n\n').trim();
+      if (!replyText) {
+        replyText = `Agradecemos muito seu feedback, ${patientName}. Sua opinião é importante e vamos trabalhar para melhorar. Se precisar de algo, entre em contato: ${CLINIC_PHONE} 🙏`;
+      }
     }
 
     await sendWhatsApp(phone, replyText);
 
-    // Mark as replied (24h cooldown) + remove from pending
     await env.PATIENTS_KV.put(`replied:${phone}`, '1', { expirationTtl: 86400 });
     await env.PATIENTS_KV.delete(`patient:${phone}`);
 
-    console.log(`AI reply sent to patient ${patientName} (${phone})`);
-    return new Response('ai-reply-sent', { status: 200 });
+    console.log(`${isPositive ? 'Positive' : 'Negative'} reply sent to ${patientName} (${phone})`);
+    return new Response(isPositive ? 'positive-reply-sent' : 'negative-reply-sent', { status: 200 });
 
   } catch (err) {
     console.error('AI/send error:', err.message);
-    const fallback = `Obrigada pelo retorno! 😊 Se puder, avalie sua consulta aqui: ${REVIEW_LINK}`;
+    // Fallback on error: don't send review link (safe default)
+    const fallback = `Obrigada pelo retorno, ${patientName}! 🙏`;
     try { await sendWhatsApp(phone, fallback); } catch {}
     await env.PATIENTS_KV.put(`replied:${phone}`, '1', { expirationTtl: 86400 }).catch(() => {});
     await env.PATIENTS_KV.delete(`patient:${phone}`).catch(() => {});

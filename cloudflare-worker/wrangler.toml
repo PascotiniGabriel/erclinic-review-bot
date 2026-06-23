@@ -2,3 +2,10 @@ name = "autoreply-juliany"
 main = "worker.js"
 compatibility_date = "2024-01-01"
 account_id = "2703834f2ad357e5e2d67ea8a27bf7ad"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "PATIENTS_KV"
+id = "__KV_NAMESPACE_ID__"

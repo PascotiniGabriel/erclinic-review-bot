@@ -106,6 +106,10 @@ async function handleRegister(request, env) {
   const { phone, name } = body;
   if (!phone || !name) return new Response('Missing phone or name', { status: 400 });
 
+  // Clear any previous replied/cooldown state for this phone
+  await env.PATIENTS_KV.delete(`replied:${phone}`).catch(() => {});
+  await env.PATIENTS_KV.delete(`cooldown:${phone}`).catch(() => {});
+
   await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
     name,
     registeredAt: Date.now()

@@ -194,13 +194,16 @@ async function handlePatientReply(env, phone, patientName, messageText) {
     return new Response(isPositive ? 'positive-reply-sent' : 'negative-reply-sent', { status: 200 });
 
   } catch (err) {
-    console.error('AI/send error:', err.message);
-    // Fallback on error: don't send review link (safe default)
-    const fallback = `Obrigada pelo retorno, ${patientName}! 🙏`;
+    console.error('AI/send error:', err.message, err.stack);
+    // Fallback: send generic positive response with link
+    const fallback = `Que bom saber, ${patientName}! 😊 Sua avaliação no Google é muito importante e ajuda outros pacientes a conhecerem o trabalho da Dra. Juliany:\n\n${REVIEW_LINK}`;
     try { await sendWhatsApp(phone, fallback); } catch {}
     await env.PATIENTS_KV.put(`replied:${phone}`, '1', { expirationTtl: 86400 }).catch(() => {});
     await env.PATIENTS_KV.delete(`patient:${phone}`).catch(() => {});
-    return new Response('fallback-sent', { status: 200 });
+    return new Response(JSON.stringify({ status: 'fallback-sent', error: err.message }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
 

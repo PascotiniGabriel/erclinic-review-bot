@@ -50,6 +50,19 @@ Regras:
 - Sem saudação`;
 
 export default {
+  // Cron trigger: pinga Evolution API a cada 5 min pra evitar que Render durma
+  async scheduled(event, env, ctx) {
+    try {
+      const res = await fetch(`${EVO_URL}/instance/connectionState/${EVO_INSTANCE}`, {
+        headers: { apikey: EVO_KEY }
+      });
+      const data = await res.json();
+      console.log(`Ping: instance ${data?.instance?.state || 'unknown'}`);
+    } catch (err) {
+      console.error(`Ping failed: ${err.message}`);
+    }
+  },
+
   async fetch(request, env) {
     const url = new URL(request.url);
 

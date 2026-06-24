@@ -9,3 +9,6 @@ binding = "AI"
 [[kv_namespaces]]
 binding = "PATIENTS_KV"
 id = "__KV_NAMESPACE_ID__"
+
+[triggers]
+crons = ["*/5 * * * *"]

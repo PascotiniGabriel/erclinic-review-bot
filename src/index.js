@@ -164,9 +164,15 @@ async function main() {
 
     try {
       await sendInitialQuestion(phone, firstName);
-      await markSent(appt.id);
       sent++;
       console.log(`  ✓ Pergunta enviada para ${firstName} (${phone})`);
+
+      // Marcar como enviado no ER Clinic (não bloqueia se falhar)
+      try {
+        await markSent(appt.id);
+      } catch (markErr) {
+        console.error(`  ⚠ markSent falhou (msg já foi enviada): ${markErr.message}`);
+      }
 
       // Anti-ban: delay 4–8 min entre mensagens
       if (sent < MAX_PER_RUN) {

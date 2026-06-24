@@ -73,7 +73,16 @@ async function markSent(id) {
 async function sendInitialQuestion(rawPhone, firstName) {
   const phone = rawPhone.replace(/\D/g, '');
 
-  // Mensagem inicial SEM link — só pergunta como foi
+  // PRIMEIRO: registrar paciente no Worker ANTES de enviar mensagem
+  // (evita race condition se paciente responder instantaneamente)
+  await fetch(`${WORKER_URL}/register-patient`, {
+    method: 'POST',
+    headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phone, name: firstName })
+  }).catch(err => {
+    console.error(`  ⚠ Falha ao registrar paciente no Worker: ${err.message}`);
+  });
+
   const message = [
     `Olá, ${firstName}! 🙂`,
     '',
@@ -101,15 +110,6 @@ async function sendInitialQuestion(rawPhone, firstName) {
     const txt = await res.text();
     throw new Error(`Evolution API → ${res.status}: ${txt}`);
   }
-
-  // Registrar paciente no Worker para follow-up com IA
-  await fetch(`${WORKER_URL}/register-patient`, {
-    method: 'POST',
-    headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ phone, name: firstName })
-  }).catch(err => {
-    console.error(`  ⚠ Falha ao registrar paciente no Worker: ${err.message}`);
-  });
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

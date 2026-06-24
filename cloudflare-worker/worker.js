@@ -66,7 +66,13 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // GET endpoints
     if (request.method === 'GET') {
+      if (url.pathname.startsWith('/check-sent/')) {
+        const apptId = url.pathname.split('/check-sent/')[1];
+        const sent = await env.PATIENTS_KV.get(`sent:${apptId}`);
+        return new Response(sent ? 'true' : 'false', { status: 200 });
+      }
       return new Response('OK', { status: 200 });
     }
 
@@ -74,18 +80,13 @@ export default {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
+    // POST endpoints
     if (url.pathname === '/register-patient') {
       return handleRegister(request, env);
     }
 
     if (url.pathname === '/mark-sent') {
       return handleMarkSent(request, env);
-    }
-
-    if (url.pathname.startsWith('/check-sent/')) {
-      const apptId = url.pathname.split('/check-sent/')[1];
-      const sent = await env.PATIENTS_KV.get(`sent:${apptId}`);
-      return new Response(sent ? 'true' : 'false', { status: 200 });
     }
 
     return handleWebhook(request, env);

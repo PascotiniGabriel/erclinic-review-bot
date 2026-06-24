@@ -149,10 +149,21 @@ async function main() {
       break;
     }
 
+    // Check both ER Clinic marker and Worker KV
     if (appt.reminder_sent_date) {
-      console.log(`  ↷ ${appt.id.slice(0, 10)}… — já enviada`);
+      console.log(`  ↷ ${appt.id.slice(0, 10)}… — já enviada (ER Clinic)`);
       continue;
     }
+
+    // Check Worker KV for sent status
+    try {
+      const checkRes = await fetch(`${WORKER_URL}/check-sent/${appt.id}`, { headers: { apikey: EVO_KEY } });
+      const wasSent = await checkRes.text();
+      if (wasSent === 'true') {
+        console.log(`  ↷ ${appt.id.slice(0, 10)}… — já enviada (KV)`);
+        continue;
+      }
+    } catch {}
 
     const phone = appt.patient_cel_phone || appt.patient_phone;
     const rawName = (appt.patient_name || 'paciente').split(' ')[0];
@@ -168,12 +179,14 @@ async function main() {
       sent++;
       console.log(`  ✓ Pergunta enviada para ${firstName} (${phone})`);
 
-      // Marcar como enviado no ER Clinic (não bloqueia se falhar)
-      try {
-        await markSent(appt.id);
-      } catch (markErr) {
-        console.error(`  ⚠ markSent falhou (msg já foi enviada): ${markErr.message}`);
-      }
+      // Mark sent in Worker KV (primary) + ER Clinic (best-effort)
+      await fetch(`${WORKER_URL}/mark-sent`, {
+        method: 'POST',
+        headers: { apikey: EVO_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId: appt.id })
+      }).catch(() => {});
+
+      try { await markSent(appt.id); } catch {}
 
       // Anti-ban: delay 4–8 min entre mensagens
       if (sent < MAX_PER_RUN) {

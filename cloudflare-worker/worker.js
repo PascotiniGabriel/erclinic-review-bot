@@ -65,9 +65,36 @@ export default {
       return handleRegister(request, env);
     }
 
+    if (url.pathname === '/mark-sent') {
+      return handleMarkSent(request, env);
+    }
+
+    if (url.pathname.startsWith('/check-sent/')) {
+      const apptId = url.pathname.split('/check-sent/')[1];
+      const sent = await env.PATIENTS_KV.get(`sent:${apptId}`);
+      return new Response(sent ? 'true' : 'false', { status: 200 });
+    }
+
     return handleWebhook(request, env);
   }
 };
+
+async function handleMarkSent(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400 }); }
+
+  const auth = request.headers.get('apikey') || '';
+  if (auth !== EVO_KEY) return new Response('Unauthorized', { status: 401 });
+
+  const { appointmentId } = body;
+  if (!appointmentId) return new Response('Missing appointmentId', { status: 400 });
+
+  // Store for 7 days (enough to cover any re-runs)
+  await env.PATIENTS_KV.put(`sent:${appointmentId}`, '1', { expirationTtl: 604800 });
+
+  console.log(`Appointment marked as sent: ${appointmentId.slice(0, 10)}`);
+  return new Response('marked', { status: 200 });
+}
 
 async function handleRegister(request, env) {
   let body;

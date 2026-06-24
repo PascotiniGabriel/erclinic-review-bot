@@ -142,7 +142,7 @@ async function handleWebhook(request, env) {
 async function handlePatientReply(env, phone, patientName, messageText) {
   try {
     // Step 1: Classify sentiment
-    const sentimentResult = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+    const sentimentResult = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [
         { role: 'system', content: SENTIMENT_PROMPT },
         { role: 'user', content: `Resposta do paciente: "${messageText}"` }
@@ -158,7 +158,7 @@ async function handlePatientReply(env, phone, patientName, messageText) {
 
     // Step 2: Generate response based on sentiment
     const responsePrompt = isPositive ? POSITIVE_PROMPT : NEGATIVE_PROMPT;
-    const aiResponse = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+    const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [
         { role: 'system', content: responsePrompt },
         { role: 'user', content: `O paciente ${patientName} respondeu: "${messageText}"` }

@@ -155,7 +155,8 @@ async function main() {
     }
 
     const phone = appt.patient_cel_phone || appt.patient_phone;
-    const firstName = (appt.patient_name || 'paciente').split(' ')[0];
+    const rawName = (appt.patient_name || 'paciente').split(' ')[0];
+    const firstName = rawName.charAt(0).toUpperCase() + rawName.slice(1).toLowerCase();
 
     if (!phone) {
       console.log(`  ✗ ${appt.id.slice(0, 10)}… — sem telefone`);

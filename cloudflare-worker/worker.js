@@ -3,6 +3,9 @@ const EVO_KEY      = 'Juliany@2024!';
 const EVO_INSTANCE = 'clinica-juliany';
 const CLINIC_PHONE = '5555991476251';
 const REVIEW_LINK  = 'https://g.page/r/CbIF9ryRK9q-EAI/review';
+const ERCLINIC_BASE = 'https://erclinic.com.br';
+const PROFISSIONAL_ID = 'a8b2f274ff2e37b46aa7dcce3c3014b2';
+// ERCLINIC_KEY is set via wrangler secret (env.ERCLINIC_KEY)
 
 const AUTO_REPLY = [
   'Olá! 😊 Este número é exclusivo para envio de avaliações da Dra. Juliany.',
@@ -49,24 +52,46 @@ Regras:
 - Português brasileiro
 - Sem saudação`;
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function todayBRT() {
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  return d.toISOString().split('T')[0];
+}
+
+function yesterdayBRT() {
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000 - 86400000);
+  return d.toISOString().split('T')[0];
+}
+
+function inBusinessHours() {
+  const h = new Date().getUTCHours();
+  return h >= 11 && h < 23;
+}
+
+function titleCase(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+}
+
+// ── Main export ─────────────────────────────────────────────────────────────
+
 export default {
-  // Cron trigger: pinga Evolution API a cada 5 min pra evitar que Render durma
   async scheduled(event, env, ctx) {
+    // Ping Evolution API to keep Render alive
     try {
-      const res = await fetch(`${EVO_URL}/instance/connectionState/${EVO_INSTANCE}`, {
+      await fetch(`${EVO_URL}/instance/connectionState/${EVO_INSTANCE}`, {
         headers: { apikey: EVO_KEY }
       });
-      const data = await res.json();
-      console.log(`Ping: instance ${data?.instance?.state || 'unknown'}`);
-    } catch (err) {
-      console.error(`Ping failed: ${err.message}`);
+    } catch {}
+
+    if (inBusinessHours()) {
+      await sendReviewQuestions(env);
     }
   },
 
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // GET endpoints
     if (request.method === 'GET') {
       if (url.pathname.startsWith('/check-sent/')) {
         const apptId = url.pathname.split('/check-sent/')[1];
@@ -80,7 +105,6 @@ export default {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
-    // POST endpoints
     if (url.pathname === '/register-patient') {
       return handleRegister(request, env);
     }
@@ -93,6 +117,78 @@ export default {
   }
 };
 
+// ── Review question sender (runs on cron) ───────────────────────────────────
+
+async function sendReviewQuestions(env) {
+  try {
+    const today = todayBRT();
+    const yesterday = yesterdayBRT();
+
+    const url = new URL(`${ERCLINIC_BASE}/v2/api/publica/agenda/appointments/list`);
+    url.searchParams.set('status', 'ATENDIDO');
+    url.searchParams.set('date_min', yesterday);
+    url.searchParams.set('date_max', today);
+    url.searchParams.set('profissional_id', PROFISSIONAL_ID);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Api-Key ${env.ERCLINIC_KEY}` }
+    });
+
+    if (!res.ok) {
+      console.error(`ER Clinic API ${res.status}`);
+      return;
+    }
+
+    const data = await res.json();
+    const appointments = data.content || [];
+    console.log(`[Cron] ${appointments.length} atendimento(s) encontrado(s)`);
+
+    for (const appt of appointments) {
+      // Check KV — already sent for this appointment?
+      const wasSent = await env.PATIENTS_KV.get(`sent:${appt.id}`);
+      if (wasSent) continue;
+
+      const phone = (appt.patient_cel_phone || appt.patient_phone || '').replace(/\D/g, '');
+      const rawName = (appt.patient_name || 'paciente').split(' ')[0];
+      const firstName = titleCase(rawName);
+
+      if (!phone) continue;
+
+      // Register patient BEFORE sending (prevents race condition)
+      await env.PATIENTS_KV.delete(`replied:${phone}`).catch(() => {});
+      await env.PATIENTS_KV.delete(`cooldown:${phone}`).catch(() => {});
+      await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
+        name: firstName,
+        registeredAt: Date.now()
+      }), { expirationTtl: 172800 });
+
+      const message = [
+        `Olá, ${firstName}! 🙂`,
+        '',
+        `Aqui é a assistente virtual da Dra. Juliany. Espero que sua consulta tenha sido ótima!`,
+        '',
+        `Como você se sentiu com o atendimento hoje?`
+      ].join('\n');
+
+      await sendWhatsApp(phone, message);
+
+      // Mark as sent in KV (7 days TTL)
+      await env.PATIENTS_KV.put(`sent:${appt.id}`, '1', { expirationTtl: 604800 });
+
+      console.log(`[Cron] Pergunta enviada para ${firstName} (${phone})`);
+
+      // MAX 1 per cron run (anti-ban)
+      return;
+    }
+
+    console.log('[Cron] Nenhum pendente');
+  } catch (err) {
+    console.error(`[Cron] Error: ${err.message}`);
+  }
+}
+
+// ── HTTP handlers ───────────────────────────────────────────────────────────
+
 async function handleMarkSent(request, env) {
   let body;
   try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400 }); }
@@ -103,10 +199,7 @@ async function handleMarkSent(request, env) {
   const { appointmentId } = body;
   if (!appointmentId) return new Response('Missing appointmentId', { status: 400 });
 
-  // Store for 7 days (enough to cover any re-runs)
   await env.PATIENTS_KV.put(`sent:${appointmentId}`, '1', { expirationTtl: 604800 });
-
-  console.log(`Appointment marked as sent: ${appointmentId.slice(0, 10)}`);
   return new Response('marked', { status: 200 });
 }
 
@@ -120,24 +213,20 @@ async function handleRegister(request, env) {
   const { phone, name } = body;
   if (!phone || !name) return new Response('Missing phone or name', { status: 400 });
 
-  // Clear any previous replied/cooldown state for this phone
   await env.PATIENTS_KV.delete(`replied:${phone}`).catch(() => {});
   await env.PATIENTS_KV.delete(`cooldown:${phone}`).catch(() => {});
 
   await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
     name,
     registeredAt: Date.now()
-  }), { expirationTtl: 172800 }); // 48h
+  }), { expirationTtl: 172800 });
 
-  console.log(`Patient registered: ${name} (${phone})`);
   return new Response('registered', { status: 200 });
 }
 
 async function handleWebhook(request, env) {
   let body;
   try { body = await request.json(); } catch { return new Response('Bad JSON', { status: 400 }); }
-
-  console.log('Webhook received:', JSON.stringify(body));
 
   const event = body.event || body.type;
   if (!['messages.upsert', 'message'].includes(event)) {
@@ -156,16 +245,10 @@ async function handleWebhook(request, env) {
 
   const phone = remoteJid.replace('@s.whatsapp.net', '');
 
-  // Already sent review link? 24h cooldown
   const alreadyReplied = await env.PATIENTS_KV.get(`replied:${phone}`);
-  if (alreadyReplied) {
-    console.log(`Already sent review link to ${phone}`);
-    return new Response('already-replied', { status: 200 });
-  }
+  if (alreadyReplied) return new Response('already-replied', { status: 200 });
 
-  // Check if registered patient (review bot sent initial question)
   const patientData = await env.PATIENTS_KV.get(`patient:${phone}`);
-
   if (patientData) {
     const patient = JSON.parse(patientData);
     const messageText = msg.message?.conversation
@@ -174,19 +257,14 @@ async function handleWebhook(request, env) {
     return handlePatientReply(env, phone, patient.name, messageText);
   }
 
-  // Not a patient — standard auto-reply with 1h cooldown
   const cooldown = await env.PATIENTS_KV.get(`cooldown:${phone}`);
-  if (cooldown) {
-    console.log(`Cooldown active for ${phone}`);
-    return new Response('cooldown', { status: 200 });
-  }
+  if (cooldown) return new Response('cooldown', { status: 200 });
 
   return sendAutoReply(env, phone);
 }
 
 async function handlePatientReply(env, phone, patientName, messageText) {
   try {
-    // Step 1: Classify sentiment
     const sentimentResult = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [
         { role: 'system', content: SENTIMENT_PROMPT },
@@ -201,7 +279,6 @@ async function handlePatientReply(env, phone, patientName, messageText) {
 
     console.log(`Sentiment for ${patientName}: ${sentiment} (positive=${isPositive})`);
 
-    // Step 2: Generate response based on sentiment
     const responsePrompt = isPositive ? POSITIVE_PROMPT : NEGATIVE_PROMPT;
     const aiResponse = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       messages: [
@@ -214,16 +291,12 @@ async function handlePatientReply(env, phone, patientName, messageText) {
 
     let replyText = aiResponse.response || '';
 
-    // Fallbacks
     if (isPositive) {
-      if (!replyText.includes(REVIEW_LINK)) {
-        replyText += `\n\n${REVIEW_LINK}`;
-      }
+      if (!replyText.includes(REVIEW_LINK)) replyText += `\n\n${REVIEW_LINK}`;
       if (!replyText.trim()) {
         replyText = `Que bom saber, ${patientName}! 😊 Sua avaliação no Google ajuda muito outros pacientes a conhecerem o trabalho da Dra. Juliany: ${REVIEW_LINK}`;
       }
     } else {
-      // Remove review link if AI accidentally included it
       replyText = replyText.replace(REVIEW_LINK, '').replace(/\n{3,}/g, '\n\n').trim();
       if (!replyText) {
         replyText = `Agradecemos muito seu feedback, ${patientName}. Sua opinião é importante e vamos trabalhar para melhorar. Se precisar de algo, entre em contato: ${CLINIC_PHONE} 🙏`;
@@ -239,16 +312,12 @@ async function handlePatientReply(env, phone, patientName, messageText) {
     return new Response(isPositive ? 'positive-reply-sent' : 'negative-reply-sent', { status: 200 });
 
   } catch (err) {
-    console.error('AI/send error:', err.message, err.stack);
-    // Fallback: send generic positive response with link
+    console.error('AI/send error:', err.message);
     const fallback = `Que bom saber, ${patientName}! 😊 Sua avaliação no Google é muito importante e ajuda outros pacientes a conhecerem o trabalho da Dra. Juliany:\n\n${REVIEW_LINK}`;
     try { await sendWhatsApp(phone, fallback); } catch {}
     await env.PATIENTS_KV.put(`replied:${phone}`, '1', { expirationTtl: 86400 }).catch(() => {});
     await env.PATIENTS_KV.delete(`patient:${phone}`).catch(() => {});
-    return new Response(JSON.stringify({ status: 'fallback-sent', error: err.message }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    return new Response('fallback-sent', { status: 200 });
   }
 }
 
@@ -256,7 +325,6 @@ async function sendAutoReply(env, phone) {
   try {
     await sendWhatsApp(phone, AUTO_REPLY);
     await env.PATIENTS_KV.put(`cooldown:${phone}`, '1', { expirationTtl: 3600 });
-    console.log(`Auto-reply sent to ${phone}`);
     return new Response('auto-reply-sent', { status: 200 });
   } catch (err) {
     console.error('Send error:', err.message);

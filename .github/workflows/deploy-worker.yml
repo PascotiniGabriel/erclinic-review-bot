@@ -54,6 +54,13 @@ jobs:
           sed -i "s/__KV_NAMESPACE_ID__/$KV_ID/" wrangler.toml
           cat wrangler.toml
 
+      - name: Set Worker secrets
+        working-directory: cloudflare-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 2703834f2ad357e5e2d67ea8a27bf7ad
+        run: echo "${{ secrets.ERCLINIC_API_KEY }}" | wrangler secret put ERCLINIC_KEY 2>/dev/null || true
+
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:

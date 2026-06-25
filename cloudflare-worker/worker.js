@@ -249,18 +249,63 @@ async function handleWebhook(request, env) {
   if (alreadyReplied) return new Response('already-replied', { status: 200 });
 
   const patientData = await env.PATIENTS_KV.get(`patient:${phone}`);
+  let patientName = null;
+
   if (patientData) {
-    const patient = JSON.parse(patientData);
+    patientName = JSON.parse(patientData).name;
+  } else {
+    // KV miss (eventual consistency) — fallback: check ER Clinic API
+    patientName = await findPatientByPhone(phone, env);
+  }
+
+  if (patientName) {
     const messageText = msg.message?.conversation
       || msg.message?.extendedTextMessage?.text
       || '';
-    return handlePatientReply(env, phone, patient.name, messageText);
+    return handlePatientReply(env, phone, patientName, messageText);
   }
 
   const cooldown = await env.PATIENTS_KV.get(`cooldown:${phone}`);
   if (cooldown) return new Response('cooldown', { status: 200 });
 
   return sendAutoReply(env, phone);
+}
+
+async function findPatientByPhone(phone, env) {
+  try {
+    const today = todayBRT();
+    const yesterday = yesterdayBRT();
+    const url = new URL(`${ERCLINIC_BASE}/v2/api/publica/agenda/appointments/list`);
+    url.searchParams.set('status', 'ATENDIDO');
+    url.searchParams.set('date_min', yesterday);
+    url.searchParams.set('date_max', today);
+    url.searchParams.set('profissional_id', PROFISSIONAL_ID);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Api-Key ${env.ERCLINIC_KEY}` }
+    });
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const match = (data.content || []).find(a => {
+      const p = (a.patient_cel_phone || a.patient_phone || '').replace(/\D/g, '');
+      return p === phone;
+    });
+
+    if (match) {
+      const rawName = (match.patient_name || 'paciente').split(' ')[0];
+      const name = titleCase(rawName);
+      // Cache in KV for subsequent messages
+      await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
+        name, registeredAt: Date.now()
+      }), { expirationTtl: 172800 });
+      console.log(`Patient found via ER Clinic fallback: ${name} (${phone})`);
+      return name;
+    }
+  } catch (err) {
+    console.error(`ER Clinic fallback error: ${err.message}`);
+  }
+  return null;
 }
 
 async function handlePatientReply(env, phone, patientName, messageText) {

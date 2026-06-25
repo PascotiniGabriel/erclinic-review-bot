@@ -10,5 +10,8 @@ binding = "AI"
 binding = "PATIENTS_KV"
 id = "__KV_NAMESPACE_ID__"
 
+[vars]
+ERCLINIC_KEY = "F9nSP2xc.oHzEP8Z0M5zg3mINAhQQrxOlgxqBE06i"
+
 [triggers]
 crons = ["*/5 * * * *"]

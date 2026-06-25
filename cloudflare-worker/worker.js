@@ -5,7 +5,6 @@ const CLINIC_PHONE = '5555991476251';
 const REVIEW_LINK  = 'https://g.page/r/CbIF9ryRK9q-EAI/review';
 const ERCLINIC_BASE = 'https://erclinic.com.br';
 const PROFISSIONAL_ID = 'a8b2f274ff2e37b46aa7dcce3c3014b2';
-// ERCLINIC_KEY is set via wrangler secret (env.ERCLINIC_KEY)
 
 const AUTO_REPLY = [
   'Olá! 😊 Este número é exclusivo para envio de avaliações da Dra. Juliany.',
@@ -248,15 +247,8 @@ async function handleWebhook(request, env) {
   const alreadyReplied = await env.PATIENTS_KV.get(`replied:${phone}`);
   if (alreadyReplied) return new Response('already-replied', { status: 200 });
 
-  const patientData = await env.PATIENTS_KV.get(`patient:${phone}`);
-  let patientName = null;
-
-  if (patientData) {
-    patientName = JSON.parse(patientData).name;
-  } else {
-    // KV miss (eventual consistency) — fallback: check ER Clinic API
-    patientName = await findPatientByPhone(phone, env);
-  }
+  // SEMPRE consultar ER Clinic como fonte primária (KV é inconsistente)
+  const patientName = await findPatientByPhone(phone, env);
 
   if (patientName) {
     const messageText = msg.message?.conversation
@@ -281,13 +273,21 @@ async function findPatientByPhone(phone, env) {
     url.searchParams.set('date_max', today);
     url.searchParams.set('profissional_id', PROFISSIONAL_ID);
 
+    const apiKey = env.ERCLINIC_KEY;
     const res = await fetch(url.toString(), {
-      headers: { Authorization: `Api-Key ${env.ERCLINIC_KEY}` }
+      headers: { Authorization: `Api-Key ${apiKey}` }
     });
-    if (!res.ok) return null;
+
+    if (!res.ok) {
+      console.error(`ER Clinic API ${res.status}: ${await res.text()}`);
+      return null;
+    }
 
     const data = await res.json();
-    const match = (data.content || []).find(a => {
+    const appointments = data.content || [];
+    console.log(`ER Clinic: ${appointments.length} atendimentos, buscando ${phone}`);
+
+    const match = appointments.find(a => {
       const p = (a.patient_cel_phone || a.patient_phone || '').replace(/\D/g, '');
       return p === phone;
     });
@@ -295,15 +295,13 @@ async function findPatientByPhone(phone, env) {
     if (match) {
       const rawName = (match.patient_name || 'paciente').split(' ')[0];
       const name = titleCase(rawName);
-      // Cache in KV for subsequent messages
-      await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
-        name, registeredAt: Date.now()
-      }), { expirationTtl: 172800 });
-      console.log(`Patient found via ER Clinic fallback: ${name} (${phone})`);
+      console.log(`Patient found: ${name} (${phone})`);
       return name;
     }
+
+    console.log(`Phone ${phone} not found in ATENDIDO list`);
   } catch (err) {
-    console.error(`ER Clinic fallback error: ${err.message}`);
+    console.error(`ER Clinic lookup error: ${err.message}`);
   }
   return null;
 }

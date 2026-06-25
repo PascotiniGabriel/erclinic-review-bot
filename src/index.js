@@ -8,7 +8,7 @@ const EVO_KEY           = process.env.EVOLUTION_API_KEY;
 const EVO_INSTANCE      = process.env.EVOLUTION_INSTANCE;
 const WORKER_URL        = 'https://autoreply-juliany.gabriel-pascotini.workers.dev';
 
-const MAX_PER_RUN = 3;
+const MAX_PER_RUN = 1;
 
 function todayBRT() {
   const d = new Date(Date.now() - 3 * 60 * 60 * 1000);

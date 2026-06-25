@@ -149,15 +149,9 @@ async function main() {
       break;
     }
 
-    // Check both ER Clinic marker and Worker KV
-    if (appt.reminder_sent_date) {
-      console.log(`  ↷ ${appt.id.slice(0, 10)}… — já enviada (ER Clinic)`);
-      continue;
-    }
-
-    // Check Worker KV for sent status
+    // Check Worker KV for sent status (by appointment ID — each consulta é única)
     try {
-      const checkRes = await fetch(`${WORKER_URL}/check-sent/${appt.id}`, { headers: { apikey: EVO_KEY } });
+      const checkRes = await fetch(`${WORKER_URL}/check-sent/${appt.id}`);
       const wasSent = await checkRes.text();
       if (wasSent === 'true') {
         console.log(`  ↷ ${appt.id.slice(0, 10)}… — já enviada (KV)`);

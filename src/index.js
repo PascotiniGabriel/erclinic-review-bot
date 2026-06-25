@@ -129,17 +129,20 @@ async function main() {
   }
 
   const today = todayBRT();
-  console.log(`[${new Date().toISOString()}] Verificando atendimentos de ${today}…`);
+  // Look back 1 day to catch patients missed yesterday
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000 - 86400000);
+  const yesterday = d.toISOString().split('T')[0];
+  console.log(`[${new Date().toISOString()}] Verificando atendimentos de ${yesterday} a ${today}…`);
 
   const data = await erclinicGet('/v2/api/publica/agenda/appointments/list', {
     status: 'ATENDIDO',
-    date_min: today,
+    date_min: yesterday,
     date_max: today,
     profissional_id: PROFISSIONAL_ID
   });
 
   const appointments = data.content || [];
-  console.log(`${appointments.length} atendimento(s) encontrado(s) hoje.`);
+  console.log(`${appointments.length} atendimento(s) encontrado(s).`);
 
   let sent = 0;
 

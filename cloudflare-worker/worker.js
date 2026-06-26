@@ -247,8 +247,17 @@ async function handleWebhook(request, env) {
   const alreadyReplied = await env.PATIENTS_KV.get(`replied:${phone}`);
   if (alreadyReplied) return new Response('already-replied', { status: 200 });
 
-  // SEMPRE consultar ER Clinic como fonte primária (KV é inconsistente)
-  const patientName = await findPatientByPhone(phone, env);
+  // 1. Check KV first (fast, usually consistent after 5+ min)
+  let patientName = null;
+  const patientData = await env.PATIENTS_KV.get(`patient:${phone}`);
+  if (patientData) {
+    try { patientName = JSON.parse(patientData).name; } catch {}
+  }
+
+  // 2. Fallback: query ER Clinic API
+  if (!patientName) {
+    patientName = await findPatientByPhone(phone, env);
+  }
 
   if (patientName) {
     const messageText = msg.message?.conversation
@@ -257,10 +266,9 @@ async function handleWebhook(request, env) {
     return handlePatientReply(env, phone, patientName, messageText);
   }
 
-  const cooldown = await env.PATIENTS_KV.get(`cooldown:${phone}`);
-  if (cooldown) return new Response('cooldown', { status: 200 });
-
-  return sendAutoReply(env, phone);
+  // Not a patient — silently ignore (no auto-reply)
+  console.log(`Unknown number ${phone} — ignored`);
+  return new Response('ignored-unknown', { status: 200 });
 }
 
 async function findPatientByPhone(phone, env) {

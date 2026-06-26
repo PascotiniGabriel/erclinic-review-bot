@@ -253,16 +253,21 @@ async function handleWebhook(request, env) {
   const alreadyReplied = await env.PATIENTS_KV.get(`replied:${phone}`);
   if (alreadyReplied) return new Response('already-replied', { status: 200 });
 
-  // 1. Check KV first (fast, usually consistent after 5+ min)
+  // 1. Check KV (fast)
   let patientName = null;
   const patientData = await env.PATIENTS_KV.get(`patient:${phone}`);
   if (patientData) {
     try { patientName = JSON.parse(patientData).name; } catch {}
   }
 
-  // 2. Fallback: query ER Clinic API
+  // 2. ER Clinic API (source of truth)
+  let apiReliable = false;
   if (!patientName) {
-    patientName = await findPatientByPhone(phone, env);
+    const result = await findPatientByPhone(phone, env);
+    patientName = result.name;
+    apiReliable = result.apiResponded;
+  } else {
+    apiReliable = true;
   }
 
   if (patientName) {
@@ -272,9 +277,16 @@ async function handleWebhook(request, env) {
     return handlePatientReply(env, phone, patientName, messageText);
   }
 
-  // Not a patient — silently ignore (no auto-reply)
-  console.log(`Unknown number ${phone} — ignored`);
-  return new Response('ignored-unknown', { status: 200 });
+  if (apiReliable) {
+    // API responded, number is NOT a patient → auto-reply
+    const cooldown = await env.PATIENTS_KV.get(`cooldown:${phone}`);
+    if (cooldown) return new Response('cooldown', { status: 200 });
+    return sendAutoReply(env, phone);
+  }
+
+  // API failed → silence (don't risk wrong message to a patient)
+  console.log(`API failed for ${phone} — silent, no auto-reply`);
+  return new Response('api-failed-silent', { status: 200 });
 }
 
 async function findPatientByPhone(phone, env) {
@@ -293,8 +305,8 @@ async function findPatientByPhone(phone, env) {
     });
 
     if (!res.ok) {
-      console.error(`ER Clinic API ${res.status}: ${await res.text()}`);
-      return null;
+      console.error(`ER Clinic API ${res.status}`);
+      return { name: null, apiResponded: false };
     }
 
     const data = await res.json();
@@ -310,14 +322,15 @@ async function findPatientByPhone(phone, env) {
       const rawName = (match.patient_name || 'paciente').split(' ')[0];
       const name = titleCase(rawName);
       console.log(`Patient found: ${name} (${phone})`);
-      return name;
+      return { name, apiResponded: true };
     }
 
     console.log(`Phone ${phone} not found in ATENDIDO list`);
+    return { name: null, apiResponded: true };
   } catch (err) {
     console.error(`ER Clinic lookup error: ${err.message}`);
+    return { name: null, apiResponded: false };
   }
-  return null;
 }
 
 async function handlePatientReply(env, phone, patientName, messageText) {

@@ -142,8 +142,12 @@ async function sendReviewQuestions(env) {
     const appointments = data.content || [];
     console.log(`[Cron] ${appointments.length} atendimento(s) encontrado(s)`);
 
+    let sentThisRun = 0;
+    const MAX_PER_RUN = 3;
+
     for (const appt of appointments) {
-      // Check KV — already sent for this appointment?
+      if (sentThisRun >= MAX_PER_RUN) break;
+
       const wasSent = await env.PATIENTS_KV.get(`sent:${appt.id}`);
       if (wasSent) continue;
 
@@ -151,36 +155,38 @@ async function sendReviewQuestions(env) {
       const rawName = (appt.patient_name || 'paciente').split(' ')[0];
       const firstName = titleCase(rawName);
 
-      if (!phone) continue;
+      if (!phone) {
+        await env.PATIENTS_KV.put(`sent:${appt.id}`, 'skipped-no-phone', { expirationTtl: 604800 });
+        continue;
+      }
 
-      // Register patient BEFORE sending (prevents race condition)
-      await env.PATIENTS_KV.delete(`replied:${phone}`).catch(() => {});
-      await env.PATIENTS_KV.delete(`cooldown:${phone}`).catch(() => {});
-      await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
-        name: firstName,
-        registeredAt: Date.now()
-      }), { expirationTtl: 172800 });
+      try {
+        // Register patient BEFORE sending
+        await env.PATIENTS_KV.delete(`replied:${phone}`).catch(() => {});
+        await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
+          name: firstName, registeredAt: Date.now()
+        }), { expirationTtl: 172800 });
 
-      const message = [
-        `Olá, ${firstName}! 🙂`,
-        '',
-        `Aqui é a assistente virtual da Dra. Juliany. Espero que sua consulta tenha sido ótima!`,
-        '',
-        `Como você se sentiu com o atendimento hoje?`
-      ].join('\n');
+        const message = [
+          `Olá, ${firstName}! 🙂`,
+          '',
+          `Aqui é a assistente virtual da Dra. Juliany. Espero que sua consulta tenha sido ótima!`,
+          '',
+          `Como você se sentiu com o atendimento hoje?`
+        ].join('\n');
 
-      await sendWhatsApp(phone, message);
-
-      // Mark as sent in KV (7 days TTL)
-      await env.PATIENTS_KV.put(`sent:${appt.id}`, '1', { expirationTtl: 604800 });
-
-      console.log(`[Cron] Pergunta enviada para ${firstName} (${phone})`);
-
-      // MAX 1 per cron run (anti-ban)
-      return;
+        await sendWhatsApp(phone, message);
+        await env.PATIENTS_KV.put(`sent:${appt.id}`, '1', { expirationTtl: 604800 });
+        console.log(`[Cron] Enviado para ${firstName} (${phone})`);
+        sentThisRun++;
+      } catch (err) {
+        // Mark as failed so it doesn't block the queue
+        await env.PATIENTS_KV.put(`sent:${appt.id}`, `failed:${err.message}`, { expirationTtl: 604800 });
+        console.error(`[Cron] Falha ${firstName} (${phone}): ${err.message}`);
+      }
     }
 
-    console.log('[Cron] Nenhum pendente');
+    console.log(`[Cron] ${sentThisRun} enviado(s) neste ciclo`);
   } catch (err) {
     console.error(`[Cron] Error: ${err.message}`);
   }

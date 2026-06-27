@@ -142,6 +142,23 @@ async function sendReviewQuestions(env) {
     const appointments = data.content || [];
     console.log(`[Cron] ${appointments.length} atendimento(s) encontrado(s)`);
 
+    // PRE-REGISTER all ATENDIDO patients in KV (ensures webhook always recognizes them)
+    for (const appt of appointments) {
+      const phone = (appt.patient_cel_phone || appt.patient_phone || '').replace(/\D/g, '');
+      if (!phone) continue;
+      const rawName = (appt.patient_name || 'paciente').split(' ')[0];
+      const firstName = titleCase(rawName);
+
+      const existing = await env.PATIENTS_KV.get(`patient:${phone}`);
+      const alreadyReplied = await env.PATIENTS_KV.get(`replied:${phone}`);
+      if (!existing && !alreadyReplied) {
+        await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
+          name: firstName, registeredAt: Date.now()
+        }), { expirationTtl: 172800 });
+      }
+    }
+
+    // Send initial questions (max 3 per run)
     let sentThisRun = 0;
     const MAX_PER_RUN = 3;
 
@@ -161,11 +178,7 @@ async function sendReviewQuestions(env) {
       }
 
       try {
-        // Register patient BEFORE sending
         await env.PATIENTS_KV.delete(`replied:${phone}`).catch(() => {});
-        await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
-          name: firstName, registeredAt: Date.now()
-        }), { expirationTtl: 172800 });
 
         const isToday = appt.date === todayBRT();
         const quando = isToday ? 'hoje' : 'ontem';
@@ -183,7 +196,6 @@ async function sendReviewQuestions(env) {
         console.log(`[Cron] Enviado para ${firstName} (${phone})`);
         sentThisRun++;
       } catch (err) {
-        // Mark as failed so it doesn't block the queue
         await env.PATIENTS_KV.put(`sent:${appt.id}`, `failed:${err.message}`, { expirationTtl: 604800 });
         console.error(`[Cron] Falha ${firstName} (${phone}): ${err.message}`);
       }

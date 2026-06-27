@@ -72,6 +72,22 @@ function titleCase(str) {
   return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
 }
 
+// Brazilian mobile numbers: WhatsApp may add/remove the 9th digit after DDD
+// ER Clinic: 5555999961353 (13 digits, with 9)
+// WhatsApp:  555599961353  (12 digits, without extra 9)
+function phonesMatch(a, b) {
+  if (a === b) return true;
+  // Try removing 9th digit from the longer one (position 4 = after country+DDD)
+  if (a.length === 13 && b.length === 12) {
+    return a.slice(0, 4) + a.slice(5) === b;
+  }
+  if (b.length === 13 && a.length === 12) {
+    return b.slice(0, 4) + b.slice(5) === a;
+  }
+  // Match last 8 digits as final fallback
+  return a.length >= 8 && b.length >= 8 && a.slice(-8) === b.slice(-8);
+}
+
 // ── Main export ─────────────────────────────────────────────────────────────
 
 export default {
@@ -148,13 +164,18 @@ async function sendReviewQuestions(env) {
       if (!phone) continue;
       const rawName = (appt.patient_name || 'paciente').split(' ')[0];
       const firstName = titleCase(rawName);
+      const patientJson = JSON.stringify({ name: firstName, registeredAt: Date.now() });
 
-      const existing = await env.PATIENTS_KV.get(`patient:${phone}`);
-      const alreadyReplied = await env.PATIENTS_KV.get(`replied:${phone}`);
-      if (!existing && !alreadyReplied) {
-        await env.PATIENTS_KV.put(`patient:${phone}`, JSON.stringify({
-          name: firstName, registeredAt: Date.now()
-        }), { expirationTtl: 172800 });
+      // Register with BOTH phone formats (ER Clinic 13-digit and WhatsApp 12-digit)
+      // WhatsApp removes 9th digit for Brazilian mobiles
+      const phoneAlt = phone.length === 13 ? phone.slice(0, 4) + phone.slice(5) : phone;
+
+      for (const p of [phone, phoneAlt]) {
+        const existing = await env.PATIENTS_KV.get(`patient:${p}`);
+        const alreadyReplied = await env.PATIENTS_KV.get(`replied:${p}`);
+        if (!existing && !alreadyReplied) {
+          await env.PATIENTS_KV.put(`patient:${p}`, patientJson, { expirationTtl: 172800 });
+        }
       }
     }
 
@@ -330,7 +351,7 @@ async function findPatientByPhone(phone, env) {
 
     const match = appointments.find(a => {
       const p = (a.patient_cel_phone || a.patient_phone || '').replace(/\D/g, '');
-      return p === phone;
+      return phonesMatch(p, phone);
     });
 
     if (match) {

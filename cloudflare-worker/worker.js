@@ -167,12 +167,15 @@ async function sendReviewQuestions(env) {
           name: firstName, registeredAt: Date.now()
         }), { expirationTtl: 172800 });
 
+        const isToday = appt.date === todayBRT();
+        const quando = isToday ? 'hoje' : 'ontem';
+
         const message = [
           `Olá, ${firstName}! 🙂`,
           '',
           `Aqui é a assistente virtual da Dra. Juliany. Espero que sua consulta tenha sido ótima!`,
           '',
-          `Como você se sentiu com o atendimento hoje?`
+          `Como você se sentiu com o atendimento de ${quando}?`
         ].join('\n');
 
         await sendWhatsApp(phone, message);

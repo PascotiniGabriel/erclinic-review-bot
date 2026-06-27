@@ -307,6 +307,14 @@ async function handleWebhook(request, env) {
   }
 
   if (patientName) {
+    // Detect audio messages
+    const isAudio = !!(msg.message?.audioMessage || msg.message?.pttMessage);
+    if (isAudio) {
+      const audioReply = `Oi, ${patientName}! Sou a assistente virtual da Dra. Juliany e infelizmente ainda nao consigo entender audios. Poderia responder por texto? Se tiver alguma duvida, entre em contato pelo WhatsApp da clinica: ${CLINIC_PHONE}`;
+      await sendWhatsApp(phone, audioReply);
+      return new Response('audio-reply-sent', { status: 200 });
+    }
+
     const messageText = msg.message?.conversation
       || msg.message?.extendedTextMessage?.text
       || '';

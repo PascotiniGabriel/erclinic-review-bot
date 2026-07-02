@@ -14,4 +14,4 @@ id = "__KV_NAMESPACE_ID__"
 ERCLINIC_KEY = "F9nSP2xc.oHzEP8Z0M5zg3mINAhQQrxOlgxqBE06i"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "0 23 * * *"]

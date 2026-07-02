@@ -5,6 +5,7 @@ const CLINIC_PHONE = '5555991476251';
 const REVIEW_LINK  = 'https://g.page/r/CbIF9ryRK9q-EAI/review';
 const ERCLINIC_BASE = 'https://erclinic.com.br';
 const PROFISSIONAL_ID = 'a8b2f274ff2e37b46aa7dcce3c3014b2';
+const DRA_PHONE    = '5555996334699';
 
 const AUTO_REPLY = [
   'Olá! 😊 Este número é exclusivo para envio de avaliações da Dra. Juliany.',
@@ -92,6 +93,12 @@ function phonesMatch(a, b) {
 
 export default {
   async scheduled(event, env, ctx) {
+    // Daily report at 20h BRT (23h UTC)
+    if (event.cron === '0 23 * * *') {
+      await sendDailyReport(env);
+      return;
+    }
+
     // Ping Evolution API to keep Render alive
     try {
       await fetch(`${EVO_URL}/instance/connectionState/${EVO_INSTANCE}`, {
@@ -126,6 +133,13 @@ export default {
 
     if (url.pathname === '/mark-sent') {
       return handleMarkSent(request, env);
+    }
+
+    if (url.pathname === '/send-report') {
+      const auth = request.headers.get('apikey') || '';
+      if (auth !== EVO_KEY) return new Response('Unauthorized', { status: 401 });
+      await sendDailyReport(env);
+      return new Response('report-sent', { status: 200 });
     }
 
     return handleWebhook(request, env);
@@ -422,6 +436,9 @@ async function handlePatientReply(env, phone, patientName, messageText) {
     await env.PATIENTS_KV.put(`replied:${phone}`, '1', { expirationTtl: 86400 });
     await env.PATIENTS_KV.delete(`patient:${phone}`);
 
+    // Track daily stats for report
+    await trackDailyStat(env, patientName, messageText, isPositive);
+
     console.log(`${isPositive ? 'Positive' : 'Negative'} reply sent to ${patientName} (${phone})`);
     return new Response(isPositive ? 'positive-reply-sent' : 'negative-reply-sent', { status: 200 });
 
@@ -432,6 +449,25 @@ async function handlePatientReply(env, phone, patientName, messageText) {
     await env.PATIENTS_KV.put(`replied:${phone}`, '1', { expirationTtl: 86400 }).catch(() => {});
     await env.PATIENTS_KV.delete(`patient:${phone}`).catch(() => {});
     return new Response('fallback-sent', { status: 200 });
+  }
+}
+
+async function trackDailyStat(env, patientName, messageText, isPositive) {
+  const date = todayBRT();
+  const key = `daily_stats:${date}`;
+  try {
+    const raw = await env.PATIENTS_KV.get(key);
+    const stats = raw ? JSON.parse(raw) : { replied: 0, positives: 0, negatives: [] };
+    stats.replied = (stats.replied || 0) + 1;
+    if (isPositive) {
+      stats.positives = (stats.positives || 0) + 1;
+    } else {
+      stats.negatives = stats.negatives || [];
+      stats.negatives.push({ name: patientName, text: messageText });
+    }
+    await env.PATIENTS_KV.put(key, JSON.stringify(stats), { expirationTtl: 172800 });
+  } catch (err) {
+    console.error('trackDailyStat error:', err.message);
   }
 }
 
@@ -456,5 +492,71 @@ async function sendWhatsApp(phone, text) {
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`Evolution API ${res.status}: ${txt}`);
+  }
+}
+
+async function sendDailyReport(env) {
+  try {
+    const date = todayBRT();
+
+    // Count sent today via ER Clinic
+    const url = new URL(`${ERCLINIC_BASE}/v2/api/publica/agenda/appointments/list`);
+    url.searchParams.set('status', 'ATENDIDO');
+    url.searchParams.set('date_min', date);
+    url.searchParams.set('date_max', date);
+    url.searchParams.set('profissional_id', PROFISSIONAL_ID);
+
+    let sentCount = 0;
+    try {
+      const res = await fetch(url.toString(), {
+        headers: { Authorization: `Api-Key ${env.ERCLINIC_KEY}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const appointments = data.content || [];
+        for (const appt of appointments) {
+          const wasSent = await env.PATIENTS_KV.get(`sent:${appt.id}`);
+          if (wasSent === '1') sentCount++;
+        }
+      }
+    } catch {}
+
+    // Load daily stats
+    const raw = await env.PATIENTS_KV.get(`daily_stats:${date}`);
+    const stats = raw ? JSON.parse(raw) : { replied: 0, positives: 0, negatives: [] };
+    const replied = stats.replied || 0;
+    const positives = stats.positives || 0;
+    const negatives = stats.negatives || [];
+
+    // Format date BR
+    const [y, m, d] = date.split('-');
+    const dateBR = `${d}/${m}/${y}`;
+
+    const lines = [
+      `📊 *Relatório do dia ${dateBR}*`,
+      '',
+      `✅ Mensagens enviadas: *${sentCount}*`,
+      `💬 Responderam: *${replied}*`,
+      `⭐ Receberam link de avaliação: *${positives}*`,
+    ];
+
+    if (negatives.length > 0) {
+      lines.push('');
+      lines.push(`❌ *Feedbacks negativos (${negatives.length}):*`);
+      for (const n of negatives) {
+        lines.push(`• *${n.name}:* "${n.text}"`);
+      }
+    }
+
+    if (replied === 0) {
+      lines.push('');
+      lines.push('_Nenhuma resposta dos pacientes hoje ainda._');
+    }
+
+    const message = lines.join('\n');
+    await sendWhatsApp(DRA_PHONE, message);
+    console.log(`[Report] Sent daily report to Dra. (${date}): ${sentCount} sent, ${replied} replied, ${positives} positive, ${negatives.length} negative`);
+  } catch (err) {
+    console.error('[Report] Error:', err.message);
   }
 }

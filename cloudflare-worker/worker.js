@@ -507,6 +507,7 @@ async function sendDailyReport(env) {
     url.searchParams.set('profissional_id', PROFISSIONAL_ID);
 
     let sentCount = 0;
+    let duplicatePhones = 0;
     try {
       const res = await fetch(url.toString(), {
         headers: { Authorization: `Api-Key ${env.ERCLINIC_KEY}` }
@@ -514,9 +515,20 @@ async function sendDailyReport(env) {
       if (res.ok) {
         const data = await res.json();
         const appointments = data.content || [];
+        const sentPhones = new Set();
         for (const appt of appointments) {
           const wasSent = await env.PATIENTS_KV.get(`sent:${appt.id}`);
-          if (wasSent === '1') sentCount++;
+          if (wasSent === '1') {
+            const rawPhone = (appt.patient_cel_phone || appt.patient_phone || '').replace(/\D/g, '');
+            // Normalize to 12-digit for dedup (remove 9th digit if 13-digit)
+            const normPhone = rawPhone.length === 13 ? rawPhone.slice(0, 4) + rawPhone.slice(5) : rawPhone;
+            if (sentPhones.has(normPhone)) {
+              duplicatePhones++;
+            } else {
+              sentPhones.add(normPhone);
+              sentCount++;
+            }
+          }
         }
       }
     } catch {}
@@ -536,9 +548,14 @@ async function sendDailyReport(env) {
       `📊 *Relatório do dia ${dateBR}*`,
       '',
       `✅ Mensagens enviadas: *${sentCount}*`,
-      `💬 Responderam: *${replied}*`,
-      `⭐ Receberam link de avaliação: *${positives}*`,
     ];
+
+    if (duplicatePhones > 0) {
+      lines.push(`_⚠️ ${duplicatePhones} agendamento(s) com número duplicado (mesmo paciente/familiar) — não contabilizado(s) acima._`);
+    }
+
+    lines.push(`💬 Responderam: *${replied}*`);
+    lines.push(`⭐ Receberam link de avaliação: *${positives}*`);
 
     if (negatives.length > 0) {
       lines.push('');
@@ -548,9 +565,12 @@ async function sendDailyReport(env) {
       }
     }
 
-    if (replied === 0) {
+    if (replied === 0 && !raw) {
       lines.push('');
-      lines.push('_Nenhuma resposta dos pacientes hoje ainda._');
+      lines.push('_Nenhuma resposta registrada hoje. Se pacientes responderam antes das 21h de hoje, os dados não foram capturados (sistema de tracking ativado hoje)._');
+    } else if (replied === 0) {
+      lines.push('');
+      lines.push('_Nenhuma resposta dos pacientes hoje._');
     }
 
     const message = lines.join('\n');
